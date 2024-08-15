@@ -2,31 +2,87 @@ package main
 
 import (
         "bufio"
+        "flag"
         "fmt"
         "net/http"
         "os"
         "regexp"
+        "sort"
         "strings"
+        "sync"
 )
+
 func main() {
-        scanner := bufio.NewScanner(os.Stdin)
-        for scanner.Scan() {
-                domain := scanner.Text()
+        concurrency := flag.Int("c", 10, "Number of concurrent requests")
+        excludePattern := flag.String("x", "", "Regex pattern to exclude certain URLs (e.g., .jpg|.png)")
+        separateSlash := flag.Bool("sed", false, "Separate URL paths by '/'")
+        flag.Parse()
+
+        var excludeRegex *regexp.Regexp
+        if *excludePattern != "" {
+                excludeRegex = regexp.MustCompile(*excludePattern)
+        }
+
+        jobs := make(chan string)
+        results := make(chan []string)
+
+        var wg sync.WaitGroup
+
+        for i := 0; i < *concurrency; i++ {
+                wg.Add(1)
+                go worker(jobs, results, &wg, excludeRegex, *separateSlash)
+        }
+
+        go func() {
+                wg.Wait()
+                close(results)
+        }()
+
+        go func() {
+                scanner := bufio.NewScanner(os.Stdin)
+                for scanner.Scan() {
+                        domain := scanner.Text()
+                        jobs <- domain
+                }
+                close(jobs)
+        }()
+
+        urlSet := make(map[string]struct{})
+        for urls := range results {
+                for _, url := range urls {
+                        urlSet[url] = struct{}{}
+                }
+        }
+
+        uniqueUrls := make([]string, 0, len(urlSet))
+        for url := range urlSet {
+                uniqueUrls = append(uniqueUrls, url)
+        }
+        sort.Strings(uniqueUrls)
+        for _, url := range uniqueUrls {
+                fmt.Println(url)
+        }
+}
+
+func worker(jobs <-chan string, results chan<- []string, wg *sync.WaitGroup, excludeRegex *regexp.Regexp, separateSlash bool) {
+        defer wg.Done()
+        for domain := range jobs {
                 urls, err := fetchWaybackURLs(domain)
                 if err != nil {
                         fmt.Fprintf(os.Stderr, "Error fetching URLs for domain %s: %v\n", domain, err)
                         continue
                 }
+                var filteredUrls []string
                 for _, url := range urls {
                         trimmedURL := trimURL(url, domain)
-                        if trimmedURL != "" {
-                                fmt.Println(trimmedURL)
+                        if trimmedURL != "" && (excludeRegex == nil || !excludeRegex.MatchString(trimmedURL)) {
+                                if separateSlash {
+                                        trimmedURL = strings.Join(strings.Split(trimmedURL, "/"), "\n")
+                                }
+                                filteredUrls = append(filteredUrls, trimmedURL)
                         }
                 }
-        }
-
-        if err := scanner.Err(); err != nil {
-                fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+                results <- filteredUrls
         }
 }
 
