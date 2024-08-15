@@ -72,7 +72,7 @@ If you want to fuzz URL parameters, you can generate a wordlist of all unique UR
 
 Creating the wordlist:
 
-`echo "hackerone.com" | wayfuzz -c 300 -mc 200 -sed -x ".jpg|.png|.jpeg|..." | anewhttps://github.com/Vulnpire/sXtract wordlist.txt`
+`echo "hackerone.com" | wayfuzz -c 300 -mc 200 -sed -x ".jpg|.png|.jpeg|..." | anew wordlist.txt`
 
 Getting the IP addresses from Shodan:
 
